@@ -6,7 +6,7 @@ This guide will help you set up the complete expense management system with Gmai
 
 - n8n instance (self-hosted or cloud)
 - Supabase account
-- OpenRouter API key
+- AIML API key
 - Gmail account
 - Python 3.8+ (for local development)
 
@@ -31,24 +31,23 @@ The schema includes RLS policies, but you may need to:
 2. Create a user profile in the `users` table
 3. Test the policies
 
-## 2. OpenRouter Setup
+## 2. AIML API Setup
 
 ### 2.1 Get API Key
 
-1. Go to [openrouter.ai](https://openrouter.ai)
+1. Go to [aimlapi.com](https://aimlapi.com)
 2. Sign up and get your API key
 3. Note down the key for n8n configuration
 
 ### 2.2 Available Models
 
-The system supports these models through OpenRouter:
-- `openai/gpt-4` (recommended)
-- `openai/gpt-4-turbo-preview`
-- `anthropic/claude-3-sonnet`
-- `anthropic/claude-3-haiku`
-- `meta-llama/llama-3-70b-instruct`
-- `google/gemini-pro`
-- `mistralai/mistral-large-latest`
+The system supports these models through AIML API:
+- `gpt-4` (recommended)
+- `gpt-3.5-turbo`
+- `claude-3-sonnet`
+- `claude-3-haiku`
+- `gemini-pro`
+- `llama-3-70b`
 
 ## 3. n8n Setup (Self-Hosted)
 
@@ -185,20 +184,20 @@ n8n start
    - Click **"Save"**
    - Click **"Connect"** and authorize with your Gmail account
 
-#### OpenRouter API Setup
-1. **Get OpenRouter API Key**:
-   - Visit [OpenRouter](https://openrouter.ai/)
+#### AIML API Setup
+1. **Get AIML API Key**:
+   - Visit [AIML API](https://aimlapi.com/)
    - Sign up and get your API key
 
-2. **Add OpenRouter Credentials in n8n**:
+2. **Add AIML API Credentials in n8n**:
    - In n8n, go to **"Credentials"**
    - Click **"Add Credential"**
    - Search for "HTTP Header Auth"
    - Select "HTTP Header Auth"
    - Fill in:
-     - **Name**: `OpenRouter API`
+     - **Name**: `aimlApiKey`
      - **Name**: `Authorization`
-     - **Value**: `Bearer YOUR_OPENROUTER_API_KEY`
+     - **Value**: `Bearer YOUR_AIML_API_KEY`
    - Click **"Save"**
 
 #### Supabase Setup
@@ -234,10 +233,10 @@ n8n start
      - **Limit**: `10`
      - **Additional Fields** > **Format**: `full`
 
-3. **Configure OpenRouter Nodes**:
+3. **Configure AIML API Nodes**:
    - Click on "AI Transaction Detection" node
-   - Verify **Authentication** is set to your OpenRouter API credential
-   - Check that **Model** is set to `openai/gpt-4`
+   - Verify **Authentication** is set to your AIML API credential
+   - Check that **Model** is set to `gpt-4`
    - Repeat for "AI Expense Extraction" node
 
 4. **Configure Supabase Node**:
@@ -429,7 +428,7 @@ Monitor which models perform best for your use case:
 - Check email filters
 
 #### LLM Not Responding
-- Verify OpenRouter API key
+- Verify AIML API key
 - Check API limits
 - Try different models
 

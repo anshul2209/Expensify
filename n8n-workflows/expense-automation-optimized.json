@@ -1,0 +1,273 @@
+{
+  "name": "Expense Automation - With API Key and Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gmail-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "gmail-push-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode PubSub message from Gmail webhook\nconst webhookData = $('Webhook Trigger').first().json || {};\n\nlet messageData;\ntry {\n  if (webhookData.message && webhookData.message.data) {\n    const decodedData = Buffer.from(webhookData.message.data, 'base64').toString('utf-8');\n    messageData = JSON.parse(decodedData);\n  } else {\n    messageData = webhookData;\n  }\n} catch (error) {\n  messageData = {\n    messageId: webhookData.messageId || 'unknown',\n    emailAddress: webhookData.emailAddress || 'unknown'\n  };\n}\n\nif (messageData.messageId) {\n  messageData.messageId = messageData.messageId.replace(/^<|>$/g, '');\n  messageData.messageId = encodeURIComponent(messageData.messageId);\n}\n\nif (webhookData.mockEmail) {\n  messageData.mockEmail = webhookData.mockEmail;\n}\n\nreturn [{ json: messageData }];"
+      },
+      "id": "decode-pubsub",
+      "name": "Decode PubSub Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "get",
+        "messageId": "={{ $('Decode PubSub Message').first().json.messageId || $('Decode PubSub Message').first().json.emailAddress || 'unknown' }}",
+        "additionalFields": {
+          "format": "full"
+        }
+      },
+      "id": "fetch-email-content",
+      "name": "Fetch Email Content",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mock email data for testing when Gmail fetch fails\nconst decodeData = $('Decode PubSub Message').first().json || {};\nconst mockEmail = decodeData.mockEmail || {\n  subject: \"Transaction Alert - Rs. 1500 debited from your account\",\n  from: \"noreply@axisbank.com\",\n  textPlain: \"Dear Customer,\\n\\nRs. 1500 has been debited from your account ending with 1234.\\n\\nTransaction Details:\\n- Amount: Rs. 1500\\n- Merchant: Axis Bank ATM\\n- Date: 15/01/2024\\n- Transaction ID: TXN123456\\n\\nIf you did not authorize this transaction, please contact us immediately.\",\n  textHtml: \"<p>Dear Customer,</p><p>Rs. 1500 has been debited from your account ending with 1234.</p><p><strong>Transaction Details:</strong></p><ul><li>Amount: Rs. 1500</li><li>Merchant: Axis Bank ATM</li><li>Date: 15/01/2024</li><li>Transaction ID: TXN123456</li></ul><p>If you did not authorize this transaction, please contact us immediately.</p>\",\n  date: new Date().toISOString(),\n  messageId: decodeData.messageId || \"test-message-123\"\n};\nreturn [{ json: mockEmail }];"
+      },
+      "id": "mock-email-data",
+      "name": "Mock Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "url": "http://prompt-manager:8001/prompts/all",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-prompts",
+      "name": "Get All Prompts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://api.aimlapi.com/v1/chat/completions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer fd0ed8e51342491aab1ef8b34638018c" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "gpt-4" },
+            { "name": "messages", "value": "=[{\"role\":\"system\",\"content\":\"{{ $('Get All Prompts').first().json.transaction_detection }}\"},{\"role\":\"user\",\"content\":\"Please analyze this email to determine if it contains a financial transaction:\\n\\nEmail Subject: {{ $('Fetch Email Content').first().json.subject }}\\nEmail Sender: {{ $('Fetch Email Content').first().json.from }}\\nEmail Content: {{ $('Fetch Email Content').first().json.textPlain || $('Fetch Email Content').first().json.textHtml }}\\n\\nReturn only a JSON response with the following structure:\\n{\\\"is_transaction\\\": true/false,\\\"confidence\\\": 0.0-1.0,\\\"reasoning\\\": \\\"brief explanation\\\",\\\"transaction_type\\\": \\\"type if detected\\\"}\"}]" },
+            { "name": "temperature", "value": 0.1 },
+            { "name": "max_tokens", "value": 500 }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ai-transaction-detection",
+      "name": "AI Transaction Detection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response for transaction detection\nconst response = $('AI Transaction Detection').first().json || {};\nconst gmailData = $('Fetch Email Content').first().json || {};\nlet detectionResult;\ntry {\n  const content = response?.choices?.[0]?.message?.content || '';\n  detectionResult = content ? JSON.parse(content) : { is_transaction: false, confidence: 0.0, reasoning: 'Parsing failed', transaction_type: 'unknown' };\n} catch (error) {\n  detectionResult = { is_transaction: false, confidence: 0.0, reasoning: 'Failed to parse AI response: ' + error.message, transaction_type: 'unknown' };\n}\nObject.assign(detectionResult, { email_subject: gmailData?.subject || '', email_sender: gmailData?.from || '', email_date: gmailData?.date || new Date().toISOString() });\nreturn detectionResult;"
+      },
+      "id": "parse-detection-result",
+      "name": "Parse Detection Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "id": "is-transaction", "leftValue": "={{ $json.is_transaction }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equal" } },
+            { "id": "confidence-threshold", "leftValue": "={{ $json.confidence }}", "rightValue": 0.5, "operator": { "type": "number", "operation": "gte" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "transaction-filter",
+      "name": "Transaction Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://api.aimlapi.com/v1/chat/completions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer fd0ed8e51342491aab1ef8b346380182323" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "gpt-4" },
+            { "name": "messages", "value": "=[{\"role\":\"system\",\"content\":\"{{ $('Get All Prompts').first().json.indian_expense_extraction }}\"},{\"role\":\"user\",\"content\":\"Please extract expense information from this Indian email:\\n\\nEmail Subject: {{ $('Fetch Email Content').first().json.subject }}\\nEmail Sender: {{ $('Fetch Email Content').first().json.from }}\\nEmail Content: {{ $('Fetch Email Content').first().json.textPlain || $('Fetch Email Content').first().json.textHtml }}\\n\\nReturn extracted JSON with Indian currency, UPI/cards/net banking, GST info, merchant name, multiple transactions.\"}]" },
+            { "name": "temperature", "value": 0.1 },
+            { "name": "max_tokens", "value": 1000 }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ai-expense-extraction",
+      "name": "AI Expense Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response for expense extraction\nconst response = $('AI Expense Extraction').first().json || {};\nconst gmailData = $('Fetch Email Content').first().json || {};\nconst detectionData = $('Parse Detection Result').first().json || {};\nlet expenseData;\ntry {\n  const content = response?.choices?.[0]?.message?.content || '';\n  expenseData = content ? JSON.parse(content) : { amount:0,currency:'INR',description:'Parsing failed',category:'other',merchant:'unknown',confidence_score:0,is_transaction:false };\n} catch(e){ expenseData={ amount:0,currency:'INR',description:'Parsing failed',category:'other',merchant:'unknown',confidence_score:0,is_transaction:false }; }\nObject.assign(expenseData, { email_subject:gmailData?.subject,email_sender:gmailData?.from,email_date:gmailData?.date,model_used:response?.model,detection_confidence:detectionData?.confidence ||0,is_transaction:Boolean(expenseData?.is_transaction),amount:parseFloat(expenseData?.amount) ||0,confidence_score:parseFloat(expenseData?.confidence_score) ||0 });\nreturn expenseData;"
+      },
+      "id": "parse-expense-data",
+      "name": "Parse Expense Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "expenses",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Fetch Email Content').first().json.user_id || '00000000-0000-0000-0000-000000000000' }}",
+            "amount": "={{ $json.amount }}",
+            "currency": "={{ $json.currency || 'INR' }}",
+            "description": "={{ $json.description }}",
+            "category": "={{ $json.category || 'other' }}",
+            "merchant": "={{ $json.merchant || 'Unknown' }}",
+            "transaction_date": "={{ $json.transaction_date || new Date().toISOString().split('T')[0] }}",
+            "payment_method": "={{ $json.payment_method || 'other' }}",
+            "city": "={{ $json.city || '' }}",
+            "state": "={{ $json.state || '' }}",
+            "gst_amount": "={{ $json.gst_amount || 0 }}",
+            "gst_percentage": "={{ $json.gst_percentage || 0 }}",
+            "confidence_score": "={{ $json.confidence_score || 0.0 }}",
+            "email_subject": "={{ $json.email_subject }}",
+            "email_sender": "={{ $json.email_sender }}",
+            "email_source": "={{ $('Fetch Email Content').first().json.messageId }}",
+            "raw_email_content": "={{ $('Fetch Email Content').first().json.textPlain || $('Fetch Email Content').first().json.textHtml }}",
+            "parsed_data": "={{ JSON.stringify($json) }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credential",
+          "name": "Supabase Credential"
+        }
+      },
+      "id": "insert-to-supabase",
+      "name": "Insert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2220, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Unified logging\nconst gmailData = $('Fetch Email Content').first().json || {};\nconst detectionData = $('Parse Detection Result').first().json || {};\nconst isTransaction = detectionData?.is_transaction && detectionData?.confidence >= 0.5;\nconst processingTime = Date.now() - new Date(gmailData?.date || Date.now()).getTime();\nreturn { user_id:gmailData?.user_id||'00000000-0000-0000-0000-000000000000', email_message_id:gmailData?.messageId||'unknown', email_subject:gmailData?.subject||'', email_sender:gmailData?.from||'', processing_status:isTransaction?'completed':'skipped', llm_response:JSON.stringify(isTransaction?$('Parse Expense Data').first().json:detectionData), processing_time_ms:processingTime, notes:isTransaction?'Successfully processed transaction email':'Email skipped - not a transaction' };"
+      },
+      "id": "unified-logging",
+      "name": "Unified Logging",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "email_processing_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.user_id }}",
+            "email_message_id": "={{ $json.email_message_id }}",
+            "email_subject": "={{ $json.email_subject }}",
+            "email_sender": "={{ $json.email_sender }}",
+            "processing_status": "={{ $json.processing_status }}",
+            "llm_response": "={{ $json.llm_response }}",
+            "processing_time_ms": "={{ $json.processing_time_ms }}",
+            "notes": "={{ $json.notes }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-credential",
+          "name": "Supabase Credential"
+        }
+      },
+      "id": "log-to-database",
+      "name": "Log to Database",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2660, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"{{ $('Unified Logging').first().json.processing_status === 'completed' ? 'success' : 'skipped' }}\", \"message\": \"{{ $('Unified Logging').first().json.processing_status === 'completed' ? 'Transaction processed and stored successfully' : 'Not a transaction email' }}\", \"data\": { \"email_subject\": $('Fetch Email Content').first().json.subject, \"detection_confidence\": $('Parse Detection Result').first().json.confidence, \"reasoning\": $('Parse Detection Result').first().json.reasoning, \"amount\": $('Parse Expense Data').first().json.amount, \"currency\": $('Parse Expense Data').first().json.currency, \"category\": $('Parse Expense Data').first().json.category, \"merchant\": $('Parse Expense Data').first().json.merchant }}",
+        "options": {}
+      },
+      "id": "unified-response",
+      "name": "Unified Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2880, 200]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main":[[{"node":"Decode PubSub Message","type":"main","index":0}]] },
+    "Decode PubSub Message": { "main":[[{"node":"Fetch Email Content","type":"main","index":0},{"node":"Mock Email Data","type":"main","index":0}]] },
+    "Fetch Email Content": { "main":[[{"node":"Get All Prompts","type":"main","index":0}]] },
+    "Mock Email Data": { "main":[[{"node":"Get All Prompts","type":"main","index":0}]] },
+    "Get All Prompts": { "main":[[{"node":"AI Transaction Detection","type":"main","index":0}]] },
+    "AI Transaction Detection": { "main":[[{"node":"Parse Detection Result","type":"main","index":0}]] },
+    "Parse Detection Result": { "main":[[{"node":"Transaction Filter","type":"main","index":0}]] },
+    "Transaction Filter": { "main":[[{"node":"AI Expense Extraction","type":"main","index":0}]] },
+    "AI Expense Extraction": { "main":[[{"node":"Parse Expense Data","type":"main","index":0}]] },
+    "Parse Expense Data": { "main":[[{"node":"Insert to Supabase","type":"main","index":0},{"node":"Unified Logging","type":"main","index":0}]] },
+    "Unified Logging": { "main":[[{"node":"Log to Database","type":"main","index":0},{"node":"Unified Response","type":"main","index":0}]] }
+  }
+}

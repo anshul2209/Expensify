@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   n8n:
     image: n8nio/n8n:latest
@@ -8,14 +6,14 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=expense123
-      - N8N_HOST=localhost
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=${WEBHOOK_URL}
       - N8N_ENCRYPTION_KEY=e77e65c44edf9b99afb2ef9796eb731e
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
@@ -24,6 +22,29 @@ services:
       - DB_POSTGRESDB_PASSWORD=n8n_password
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./llm:/app/llm
+      - ./api:/app/api
+    depends_on:
+      - postgres
+      - prompt-manager
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prompt-manager:
+    image: python:3.11-slim
+    container_name: prompt-manager
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    working_dir: /app
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./api:/app/api
+      - ./llm:/app/llm
+    command: >
+      sh -c "pip install fastapi uvicorn &&
+             python api/prompt_manager.py"
     depends_on:
       - postgres
 

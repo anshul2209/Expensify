@@ -150,6 +150,23 @@ async def get_prompt_simple(prompt_type: str):
         "version": prompt_manager.get_prompt_info(prompt_type)['version']
     }
 
+@app.get("/prompts/all")
+async def get_all_prompts():
+    """Get all available prompts in a single request"""
+    try:
+        prompts = {}
+        for prompt_type in ["transaction_detection", "indian_expense_extraction", "nlp_query"]:
+            content = prompt_manager.get_prompt(prompt_type)
+            if content:
+                prompts[prompt_type] = content
+        
+        if prompts:
+            return prompts
+        else:
+            raise HTTPException(status_code=404, detail="No prompts found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/prompts/reload")
 async def reload_prompts():
     """Reload prompts from files"""
