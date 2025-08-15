@@ -66,7 +66,7 @@ curl http://localhost:8001/prompts/indian_expense_extraction
 
 ### **3. Use in n8n**
 
-Import the dynamic workflow: `n8n-workflows/expense-automation-dynamic.json`
+Import the workflow: `n8n-workflows/expense-automation.json`
 
 The workflow will automatically fetch prompts from the API service.
 
@@ -161,22 +161,17 @@ prompt_manager = PromptManager(
 
 ## 🔄 **Migration from Embedded Prompts**
 
-### **1. Backup Current Workflow**
-```bash
-cp n8n-workflows/expense-automation.json n8n-workflows/expense-automation-backup.json
-```
-
-### **2. Start Prompt Manager**
+### **1. Start Prompt Manager**
 ```bash
 ./start_prompt_manager.sh
 ```
 
-### **3. Import Dynamic Workflow**
-- Import `expense-automation-dynamic.json` in n8n
+### **2. Import Workflow**
+- Import `expense-automation.json` in n8n
 - Configure credentials (Gmail, OpenRouter, Supabase)
 - Test with sample emails
 
-### **4. Verify Functionality**
+### **3. Verify Functionality**
 - Check prompt loading in n8n logs
 - Verify expense extraction works
 - Monitor processing logs in Supabase

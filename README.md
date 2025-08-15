@@ -46,21 +46,23 @@ Gmail → n8n Workflow → LLM Processing → Supabase → NLP Query Interface
 
 ```
 ├── n8n-workflows/
-│   ├── expense-automation.json
-│   └── nlp-query-workflow.json
+│   └── expense-automation.json          # Main n8n workflow (dynamic prompts)
 ├── supabase/
 │   ├── migrations/
 │   ├── functions/
 │   └── schema.sql
 ├── llm/
-│   ├── prompts/
-│   └── classification.py
+│   ├── prompts/                         # AI prompts for transaction detection & extraction
+│   └── classification.py                # LLM integration logic
 ├── api/
+│   ├── prompt_manager.py                # FastAPI service for prompt management
 │   ├── expense-api.py
 │   └── nlp-query.py
-└── docs/
-    ├── setup.md
-    └── api-reference.md
+├── docs/
+│   ├── setup.md                         # Setup instructions
+│   ├── prompt-management.md             # Prompt management strategy
+│   └── api-reference.md
+└── start_prompt_manager.sh              # Script to start prompt manager service
 ```
 
 ## Usage Examples
