@@ -9,16 +9,16 @@ This project implements an automated expense management system that:
 ## Features
 
 - **Gmail Integration**: Automatically detects transaction emails
-- **LLM Processing**: Uses OpenAI GPT for email parsing and expense classification
+- **LLM Processing**: Uses OpenRouter + GPT-4 for email parsing and classification
 - **Supabase Database**: Stores structured expense data
-- **NLP Queries**: Natural language expense analysis and reporting
-- **Categories**: Automatic expense categorization
-- **Trends**: Spending pattern analysis
+- **WhatsApp NLP Queries**: Natural language expense queries via WhatsApp
+- **AI-Powered Analysis**: Intelligent expense categorization and insights
+- **Real-time Processing**: Instant transaction detection and storage
 
 ## Architecture
 
 ```
-Gmail → n8n Workflow → LLM Processing → Supabase → NLP Query Interface
+Gmail → n8n Workflow → LLM Processing → Supabase → WhatsApp NLP Queries
 ```
 
 ## Setup Instructions
@@ -52,26 +52,25 @@ Gmail → n8n Workflow → LLM Processing → Supabase → NLP Query Interface
 │   ├── functions/
 │   └── schema.sql
 ├── llm/
-│   ├── prompts/                         # AI prompts for transaction detection & extraction
-│   └── classification.py                # LLM integration logic
+│   └── prompts/                         # AI prompts for transaction detection & extraction
 ├── api/
-│   ├── prompt_manager.py                # FastAPI service for prompt management
-│   ├── expense-api.py
-│   └── nlp-query.py
+│   └── prompt_manager.py                # FastAPI service for prompt management
 ├── docs/
 │   ├── setup.md                         # Setup instructions
 │   ├── prompt-management.md             # Prompt management strategy
-│   └── api-reference.md
+│   └── application-flow.md              # Application flow documentation
 └── start_prompt_manager.sh              # Script to start prompt manager service
 ```
 
 ## Usage Examples
 
-### NLP Queries
+### WhatsApp NLP Queries
 - "How much did I spend in January?"
 - "Show me travel expenses for the last 3 months"
 - "What are my spending trends?"
 - "Which category has the highest expenses?"
+- "Show me my recent Amazon purchases"
+- "Compare this month vs last month"
 
 ### Expense Categories
 - Food & Dining
@@ -85,15 +84,16 @@ Gmail → n8n Workflow → LLM Processing → Supabase → NLP Query Interface
 
 ## API Endpoints
 
-- `POST /api/expenses` - Add expense manually
-- `GET /api/expenses` - List expenses with filters
-- `POST /api/query` - NLP query interface
-- `GET /api/analytics` - Spending analytics
+- `GET /prompts` - List all available prompts
+- `GET /prompts/{prompt_type}` - Get specific prompt
+- `POST /prompts/reload` - Reload prompts from files
+- `POST /webhook/whatsapp-nlp-webhook` - WhatsApp NLP query webhook
 
 ## Technologies Used
 
 - **n8n**: Workflow automation
-- **OpenAI GPT**: Email parsing and classification
+- **OpenRouter**: LLM API gateway
 - **Supabase**: Database and real-time features
-- **Python**: API and LLM integration
+- **FastAPI**: Prompt management service
 - **Gmail API**: Email monitoring
+- **WhatsApp Business API**: NLP query interface

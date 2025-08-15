@@ -1,5 +1,5 @@
 {
-  "name": "Expense Automation",
+  "name": "Expense Automation with NLP Queries",
   "nodes": [
     {
       "parameters": {
@@ -18,6 +18,226 @@
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1,
       "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "whatsapp-webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 500],
+      "webhookId": "whatsapp-nlp-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-whatsapp-query",
+              "leftValue": "={{ $json.body && $json.body.message && $json.body.message.text }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "whatsapp-query-filter",
+      "name": "WhatsApp Query Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "prompts/nlp_query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-nlp-prompt",
+      "name": "Get NLP Query Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 500],
+      "webhookId": "nlp-prompt-webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openrouterApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://n8n.io"
+            },
+            {
+              "name": "X-Title",
+              "value": "Expense Management System"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"{{ $('Get NLP Query Prompt').first().json.content }}\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"{{ $('WhatsApp Webhook').first().json.body.message.text }}\"\n  }\n]"
+            },
+            {
+              "name": "temperature",
+              "value": 0.1
+            },
+            {
+              "name": "max_tokens",
+              "value": 1000
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "nlp-query-ai",
+      "name": "NLP Query AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response for SQL query generation\nconst response = $('NLP Query AI').first().json;\n\nlet queryData;\ntry {\n  // Try to parse the content as JSON\n  const content = response.choices[0].message.content;\n  queryData = JSON.parse(content);\n} catch (error) {\n  // Fallback if JSON parsing fails\n  queryData = {\n    query_type: 'error',\n    sql_query: null,\n    explanation: 'Failed to parse AI response',\n    error: error.message\n  };\n}\n\n// Add metadata\nqueryData.user_query = $('WhatsApp Webhook').first().json.body.message.text;\nqueryData.model_used = response.model || 'unknown';\nqueryData.timestamp = new Date().toISOString();\n\nreturn queryData;"
+      },
+      "id": "parse-nlp-response",
+      "name": "Parse NLP Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-sql-query",
+              "leftValue": "={{ $json.sql_query }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sql-query-check",
+      "name": "SQL Query Check",
+      "typeVersion": 2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql_query }}",
+        "options": {}
+      },
+      "id": "execute-sql-query",
+      "name": "Execute SQL Query",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1560, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format database results for WhatsApp response\nconst queryData = $('Parse NLP Response').first().json;\nconst dbResults = $('Execute SQL Query').first().json;\n\nlet responseText = '';\n\nif (queryData.query_type === 'summary') {\n  // Format summary data\n  if (dbResults && dbResults.length > 0) {\n    const result = dbResults[0];\n    responseText = `📊 ${queryData.explanation}\\n\\n`;\n    \n    if (result.total_amount) {\n      responseText += `💰 Total Amount: ₹${result.total_amount.toLocaleString()}\\n`;\n    }\n    if (result.transaction_count) {\n      responseText += `📝 Transactions: ${result.transaction_count}\\n`;\n    }\n    if (result.average_amount) {\n      responseText += `📈 Average: ₹${result.average_amount.toLocaleString()}\\n`;\n    }\n  } else {\n    responseText = `❌ No data found for your query: \"${queryData.user_query}\"`;\n  }\n} else if (queryData.query_type === 'list') {\n  // Format list data\n  if (dbResults && dbResults.length > 0) {\n    responseText = `📋 ${queryData.explanation}\\n\\n`;\n    \n    dbResults.slice(0, 10).forEach((item, index) => {\n      responseText += `${index + 1}. ${item.merchant || item.category} - ₹${item.amount?.toLocaleString() || 'N/A'}\\n`;\n      if (item.transaction_date) {\n        responseText += `   📅 ${item.transaction_date}\\n`;\n      }\n      responseText += '\\n';\n    });\n    \n    if (dbResults.length > 10) {\n      responseText += `... and ${dbResults.length - 10} more transactions`;\n    }\n  } else {\n    responseText = `❌ No transactions found for your query: \"${queryData.user_query}\"`;\n  }\n} else if (queryData.query_type === 'trends') {\n  // Format trends data\n  if (dbResults && dbResults.length > 0) {\n    responseText = `📈 ${queryData.explanation}\\n\\n`;\n    \n    dbResults.forEach(item => {\n      responseText += `📊 ${item.category || item.month}: ₹${item.total_amount?.toLocaleString() || 'N/A'}\\n`;\n    });\n  } else {\n    responseText = `❌ No trend data found for your query: \"${queryData.user_query}\"`;\n  }\n} else {\n  responseText = `❌ Sorry, I couldn't understand your query: \"${queryData.user_query}\"\\n\\nTry asking:\\n• \"How much did I spend in January?\"\\n• \"Show me travel expenses\"\\n• \"What are my spending trends?\"`;\n}\n\nreturn {\n  response_text: responseText,\n  query_type: queryData.query_type,\n  user_query: queryData.user_query,\n  results_count: dbResults ? dbResults.length : 0\n};"
+      },
+      "id": "format-whatsapp-response",
+      "name": "Format WhatsApp Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": $json.response_text,\n  \"data\": {\n    \"query_type\": $json.query_type,\n    \"user_query\": $json.user_query,\n    \"results_count\": $json.results_count\n  }\n}",
+        "options": {}
+      },
+      "id": "whatsapp-response",
+      "name": "WhatsApp Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"Sorry, I couldn't generate a proper query for your question.\",\n  \"data\": {\n    \"user_query\": $('WhatsApp Webhook').first().json.body.message.text,\n    \"error\": $json.explanation || 'Unknown error'\n  }\n}",
+        "options": {}
+      },
+      "id": "nlp-error-response",
+      "name": "NLP Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 600]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "nlp_query_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('WhatsApp Webhook').first().json.body.message.from || '00000000-0000-0000-0000-000000000000' }}",
+            "query_text": "={{ $('WhatsApp Webhook').first().json.body.message.text }}",
+            "query_type": "={{ $json.query_type || 'unknown' }}",
+            "response_data": "={{ JSON.stringify($json) }}",
+            "processing_time_ms": "={{ Date.now() - new Date($('WhatsApp Webhook').first().json.body.message.timestamp).getTime() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-nlp-query",
+      "name": "Log NLP Query",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2220, 500]
     },
     {
       "parameters": {
@@ -254,22 +474,24 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
+            "user_id": "={{ $('Gmail Trigger').first().json.user_id || '00000000-0000-0000-0000-000000000000' }}",
             "amount": "={{ $json.amount }}",
             "currency": "={{ $json.currency || 'INR' }}",
             "description": "={{ $json.description }}",
-            "category": "={{ $json.category }}",
-            "merchant": "={{ $json.merchant }}",
-            "transaction_date": "={{ $json.transaction_date }}",
-            "payment_method": "={{ $json.payment_method }}",
-            "city": "={{ $json.city }}",
-            "state": "={{ $json.state }}",
-            "gst_amount": "={{ $json.gst_amount }}",
-            "gst_percentage": "={{ $json.gst_percentage }}",
-            "confidence_score": "={{ $json.confidence_score }}",
+            "category": "={{ $json.category || 'other' }}",
+            "merchant": "={{ $json.merchant || 'Unknown' }}",
+            "transaction_date": "={{ $json.transaction_date || new Date().toISOString().split('T')[0] }}",
+            "payment_method": "={{ $json.payment_method || 'other' }}",
+            "city": "={{ $json.city || '' }}",
+            "state": "={{ $json.state || '' }}",
+            "gst_amount": "={{ $json.gst_amount || 0 }}",
+            "gst_percentage": "={{ $json.gst_percentage || 0 }}",
+            "confidence_score": "={{ $json.confidence_score || 0.0 }}",
             "email_subject": "={{ $json.email_subject }}",
             "email_sender": "={{ $json.email_sender }}",
-            "model_used": "={{ $json.model_used }}",
-            "detection_confidence": "={{ $json.detection_confidence }}"
+            "email_source": "={{ $('Gmail Trigger').first().json.messageId }}",
+            "raw_email_content": "={{ $('Gmail Trigger').first().json.textPlain || $('Gmail Trigger').first().json.textHtml }}",
+            "parsed_data": "={{ JSON.stringify($json) }}"
           }
         },
         "options": {}
@@ -288,13 +510,13 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
+            "user_id": "={{ $('Gmail Trigger').first().json.user_id || '00000000-0000-0000-0000-000000000000' }}",
+            "email_message_id": "={{ $('Gmail Trigger').first().json.messageId }}",
             "email_subject": "={{ $('Gmail Trigger').first().json.subject }}",
             "email_sender": "={{ $('Gmail Trigger').first().json.from }}",
-            "processing_status": "success",
-            "detection_confidence": "={{ $('Parse Detection Result').first().json.confidence }}",
-            "extraction_confidence": "={{ $json.confidence_score }}",
-            "model_used": "={{ $json.model_used }}",
-            "processing_time": "={{ new Date().toISOString() }}",
+            "processing_status": "completed",
+            "llm_response": "={{ JSON.stringify($json) }}",
+            "processing_time_ms": "={{ Date.now() - new Date($('Gmail Trigger').first().json.date).getTime() }}",
             "notes": "Successfully processed transaction email"
           }
         },
@@ -338,13 +560,13 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
+            "user_id": "={{ $('Gmail Trigger').first().json.user_id || '00000000-0000-0000-0000-000000000000' }}",
+            "email_message_id": "={{ $('Gmail Trigger').first().json.messageId }}",
             "email_subject": "={{ $('Gmail Trigger').first().json.subject }}",
             "email_sender": "={{ $('Gmail Trigger').first().json.from }}",
             "processing_status": "skipped",
-            "detection_confidence": "={{ $('Parse Detection Result').first().json.confidence }}",
-            "extraction_confidence": 0,
-            "model_used": "={{ $('Parse Detection Result').first().json.model_used }}",
-            "processing_time": "={{ new Date().toISOString() }}",
+            "llm_response": "={{ JSON.stringify($('Parse Detection Result').first().json) }}",
+            "processing_time_ms": "={{ Date.now() - new Date($('Gmail Trigger').first().json.date).getTime() }}",
             "notes": "Email skipped - not a transaction"
           }
         },
@@ -510,6 +732,141 @@
         [
           {
             "node": "Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Query Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Query Filter": {
+      "main": [
+        [
+          {
+            "node": "Get NLP Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NLP Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NLP Prompt": {
+      "main": [
+        [
+          {
+            "node": "NLP Query AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NLP Query AI": {
+      "main": [
+        [
+          {
+            "node": "Parse NLP Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse NLP Response": {
+      "main": [
+        [
+          {
+            "node": "SQL Query Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQL Query Check": {
+      "main": [
+        [
+          {
+            "node": "Execute SQL Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute SQL Query": {
+      "main": [
+        [
+          {
+            "node": "Log NLP Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Response": {
+      "main": [
+        [
+          {
+            "node": "Log NLP Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NLP Error Response": {
+      "main": [
+        [
+          {
+            "node": "Log NLP Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log NLP Query": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Response",
             "type": "main",
             "index": 0
           }
