@@ -1,0 +1,529 @@
+{
+  "name": "Expense Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 10,
+        "simple": false,
+        "additionalFields": {
+          "format": "full"
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "prompts/transaction_detection",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-transaction-prompt",
+      "name": "Get Transaction Detection Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 200],
+      "webhookId": "transaction-prompt-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "prompt-available",
+              "leftValue": "={{ $json.content }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "prompt-check",
+      "name": "Check Prompt Available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openrouterApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://n8n.io"
+            },
+            {
+              "name": "X-Title",
+              "value": "Expense Management System"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"{{ $('Get Transaction Detection Prompt').first().json.content }}\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"Please analyze this email to determine if it contains a financial transaction:\\n\\nEmail Subject: {{ $('Gmail Trigger').first().json.subject }}\\nEmail Sender: {{ $('Gmail Trigger').first().json.from }}\\nEmail Content: {{ $('Gmail Trigger').first().json.textPlain || $('Gmail Trigger').first().json.textHtml }}\\n\\nReturn only a JSON response with the following structure:\\n{\\n  \\\"is_transaction\\\": true/false,\\n  \\\"confidence\\\": 0.0-1.0,\\n  \\\"reasoning\\\": \\\"brief explanation\\\",\\n  \\\"transaction_type\\\": \\\"type if detected\\\"\\n}\"\n  }\n]"
+            },
+            {
+              "name": "temperature",
+              "value": 0.1
+            },
+            {
+              "name": "max_tokens",
+              "value": 500
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "transaction-detection-ai",
+      "name": "AI Transaction Detection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response for transaction detection\nconst response = $('AI Transaction Detection').first().json;\n\nlet detectionResult;\ntry {\n  // Try to parse the content as JSON\n  const content = response.choices[0].message.content;\n  detectionResult = JSON.parse(content);\n} catch (error) {\n  // Fallback if JSON parsing fails\n  detectionResult = {\n    is_transaction: false,\n    confidence: 0.0,\n    reasoning: 'Failed to parse AI response',\n    transaction_type: 'unknown'\n  };\n}\n\n// Add email metadata\ndetectionResult.email_subject = $('Gmail Trigger').first().json.subject;\ndetectionResult.email_sender = $('Gmail Trigger').first().json.from;\ndetectionResult.email_date = $('Gmail Trigger').first().json.date;\ndetectionResult.model_used = response.model || 'unknown';\n\ndetectionResult.is_transaction = Boolean(detectionResult.is_transaction);\ndetectionResult.confidence = parseFloat(detectionResult.confidence) || 0.0;\n\nreturn detectionResult;"
+      },
+      "id": "parse-detection-result",
+      "name": "Parse Detection Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-transaction",
+              "leftValue": "={{ $json.is_transaction }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            },
+            {
+              "id": "confidence-threshold",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 0.5,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "transaction-filter",
+      "name": "Transaction Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "prompts/indian_expense_extraction",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-expense-prompt",
+      "name": "Get Expense Extraction Prompt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1560, 100],
+      "webhookId": "expense-prompt-webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.openrouterApiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://n8n.io"
+            },
+            {
+              "name": "X-Title",
+              "value": "Expense Management System"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/gpt-4"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"{{ $('Get Expense Extraction Prompt').first().json.content }}\"\n  },\n  {\n    \"role\": \"user\",\n    \"content\": \"Please extract expense information from this Indian email:\\n\\nEmail Subject: {{ $('Gmail Trigger').first().json.subject }}\\nEmail Sender: {{ $('Gmail Trigger').first().json.from }}\\nEmail Content: {{ $('Gmail Trigger').first().json.textPlain || $('Gmail Trigger').first().json.textHtml }}\\n\\nFollow the comprehensive guidelines provided in the system prompt to extract all financial information.\\nPay special attention to:\\n- Indian currency patterns (₹, Rs, INR)\\n- Indian payment methods (UPI, cards, net banking)\\n- GST information\\n- Indian merchant names\\n- Multiple transactions if present\\n- Refunds vs expenses\\n\\nReturn the extracted information in the specified JSON format.\"\n  }\n]"
+            },
+            {
+              "name": "temperature",
+              "value": 0.1
+            },
+            {
+              "name": "max_tokens",
+              "value": 1000
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "expense-extraction-ai",
+      "name": "AI Expense Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response for expense extraction\nconst response = $('AI Expense Extraction').first().json;\n\nlet expenseData;\ntry {\n  // Try to parse the content as JSON\n  const content = response.choices[0].message.content;\n  expenseData = JSON.parse(content);\n} catch (error) {\n  // Fallback if JSON parsing fails\n  expenseData = {\n    amount: 0,\n    currency: 'INR',\n    description: 'Failed to parse expense data',\n    category: 'other',\n    merchant: 'unknown',\n    confidence_score: 0.0,\n    is_transaction: false\n  };\n}\n\n// Add metadata\nexpenseData.email_subject = $('Gmail Trigger').first().json.subject;\nexpenseData.email_sender = $('Gmail Trigger').first().json.from;\nexpenseData.email_date = $('Gmail Trigger').first().json.date;\nexpenseData.model_used = response.model || 'unknown';\nexpenseData.detection_confidence = $('Parse Detection Result').first().json.confidence;\n\nexpenseData.amount = parseFloat(expenseData.amount) || 0;\nexpenseData.confidence_score = parseFloat(expenseData.confidence_score) || 0.0;\nexpenseData.is_transaction = Boolean(expenseData.is_transaction);\n\nreturn expenseData;"
+      },
+      "id": "parse-expense-data",
+      "name": "Parse Expense Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 100]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "expenses",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "amount": "={{ $json.amount }}",
+            "currency": "={{ $json.currency || 'INR' }}",
+            "description": "={{ $json.description }}",
+            "category": "={{ $json.category }}",
+            "merchant": "={{ $json.merchant }}",
+            "transaction_date": "={{ $json.transaction_date }}",
+            "payment_method": "={{ $json.payment_method }}",
+            "city": "={{ $json.city }}",
+            "state": "={{ $json.state }}",
+            "gst_amount": "={{ $json.gst_amount }}",
+            "gst_percentage": "={{ $json.gst_percentage }}",
+            "confidence_score": "={{ $json.confidence_score }}",
+            "email_subject": "={{ $json.email_subject }}",
+            "email_sender": "={{ $json.email_sender }}",
+            "model_used": "={{ $json.model_used }}",
+            "detection_confidence": "={{ $json.detection_confidence }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "insert-to-supabase",
+      "name": "Insert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2220, 100]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "email_processing_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email_subject": "={{ $('Gmail Trigger').first().json.subject }}",
+            "email_sender": "={{ $('Gmail Trigger').first().json.from }}",
+            "processing_status": "success",
+            "detection_confidence": "={{ $('Parse Detection Result').first().json.confidence }}",
+            "extraction_confidence": "={{ $json.confidence_score }}",
+            "model_used": "={{ $json.model_used }}",
+            "processing_time": "={{ new Date().toISOString() }}",
+            "notes": "Successfully processed transaction email"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-processing",
+      "name": "Log Processing",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2440, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Transaction processed successfully\",\n  \"data\": {\n    \"amount\": $json.amount,\n    \"currency\": $json.currency,\n    \"category\": $json.category,\n    \"merchant\": $json.merchant,\n    \"detection_confidence\": $json.detection_confidence,\n    \"extraction_confidence\": $json.confidence_score,\n    \"model_used\": $json.model_used\n  }\n}",
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2660, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"skipped\",\n  \"message\": \"Not a transaction email\",\n  \"data\": {\n    \"email_subject\": $('Gmail Trigger').first().json.subject,\n    \"detection_confidence\": $('Parse Detection Result').first().json.confidence,\n    \"reasoning\": $('Parse Detection Result').first().json.reasoning\n  }\n}",
+        "options": {}
+      },
+      "id": "not-transaction-response",
+      "name": "Not Transaction Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "email_processing_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email_subject": "={{ $('Gmail Trigger').first().json.subject }}",
+            "email_sender": "={{ $('Gmail Trigger').first().json.from }}",
+            "processing_status": "skipped",
+            "detection_confidence": "={{ $('Parse Detection Result').first().json.confidence }}",
+            "extraction_confidence": 0,
+            "model_used": "={{ $('Parse Detection Result').first().json.model_used }}",
+            "processing_time": "={{ new Date().toISOString() }}",
+            "notes": "Email skipped - not a transaction"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-skipped",
+      "name": "Log Skipped",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"Failed to load prompt\",\n  \"error\": \"Prompt not available\"\n}",
+        "options": {}
+      },
+      "id": "prompt-error-response",
+      "name": "Prompt Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 400]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Transaction Detection Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transaction Detection Prompt": {
+      "main": [
+        [
+          {
+            "node": "Check Prompt Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Prompt Available": {
+      "main": [
+        [
+          {
+            "node": "AI Transaction Detection",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prompt Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Transaction Detection": {
+      "main": [
+        [
+          {
+            "node": "Parse Detection Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Detection Result": {
+      "main": [
+        [
+          {
+            "node": "Transaction Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transaction Filter": {
+      "main": [
+        [
+          {
+            "node": "Get Expense Extraction Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not Transaction Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Expense Extraction Prompt": {
+      "main": [
+        [
+          {
+            "node": "AI Expense Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Expense Extraction": {
+      "main": [
+        [
+          {
+            "node": "Parse Expense Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Expense Data": {
+      "main": [
+        [
+          {
+            "node": "Insert to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Log Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Processing": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not Transaction Response": {
+      "main": [
+        [
+          {
+            "node": "Log Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
